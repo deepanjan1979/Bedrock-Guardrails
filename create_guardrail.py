@@ -641,13 +641,21 @@ class BankingGuardrailManager:
         Returns:
             str: The ID of the created guardrail, or None if creation failed.
         """
+        print("\n🔍 Initializing guardrail deployment...")
+        
+        # Set guardrail name with timestamp if not provided
         if not guardrail_name:
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             guardrail_name = f"{self.base_guardrail_name}-{timestamp}"
+            
+        print(f"📛 Guardrail name: {guardrail_name}")
+        print(f"🌐 AWS Region: {self.region}")
 
         print(f"\n🚀 Creating new guardrail: {guardrail_name}")
 
         try:
+            print("\n🛠️  Configuring guardrail policies...")
+            
             # Get all policy configurations
             content_policy = self._get_content_policy_config()
             topic_policy = self._get_topic_policy_config()
@@ -655,13 +663,17 @@ class BankingGuardrailManager:
             sensitive_info_policy = self._get_sensitive_info_policy_config()
             contextual_grounding_policy = self._get_contextual_grounding_policy_config()
             automated_reasoning_policy = self._get_automated_reasoning_policy_config()
+            
+            print("✅ Policy configurations generated")
 
-            # Prepare guardrail configuration with only supported parameters
+            print("\n🔧 Building guardrail configuration...")
+            
+            # Prepare guardrail configuration (model-agnostic)
             guardrail_config = {
                 'name': guardrail_name,
-                'description': 'Comprehensive guardrail for banking voice bot with enhanced security and compliance',
-                'blockedInputMessaging': "I'm sorry, but I can't process that request. For security reasons, certain actions require additional verification.",
-                'blockedOutputsMessaging': "I'm sorry, but I can't provide that information through this channel. Please contact customer service for assistance.",
+                'description': 'Guardrail for banking voice bot with enhanced security',
+                'blockedInputMessaging': 'This request cannot be processed. Please contact support for assistance.',
+                'blockedOutputsMessaging': 'This information cannot be provided. Please contact customer service.',
                 'contentPolicyConfig': content_policy,
                 'topicPolicyConfig': topic_policy,
                 'wordPolicyConfig': word_policy,
@@ -669,8 +681,8 @@ class BankingGuardrailManager:
                 'contextualGroundingPolicyConfig': contextual_grounding_policy,
                 'tags': [
                     {'key': 'environment', 'value': 'production'},
-                    {'key': 'department', 'value': 'customer_service'},
-                    {'key': 'compliance', 'value': 'pci-dss'},
+                    {'key': 'department', 'value': 'banking'},
+                    {'key': 'version', 'value': '1.0'},
                     {'key': 'managed_by', 'value': 'security_team'}
                 ]
             }
@@ -679,22 +691,18 @@ class BankingGuardrailManager:
             if automated_reasoning_policy is not None:
                 guardrail_config['automatedReasoningPolicyConfig'] = automated_reasoning_policy
 
-            # Load environment variables from .env file
-            from dotenv import load_dotenv
-            load_dotenv()
+            # Get KMS key from environment variables
+            kms_key_id = os.getenv('KMS_KEY_ID') or os.getenv('KMS_KEY_ARN')
             
-            # Get KMS key from .env file
-            kms_key_id = os.getenv('KMS_KEY_ID')
-            # KMS key is required for guardrail creation
             if not kms_key_id:
                 raise ValueError(
                     "❌ KMS key is required for guardrail creation.\n"
-                    "Please provide a valid KMS key ARN in your .env file.\n"
-                    "Example: KMS_KEY_ARN=arn:aws:kms:region:account-id:key/key-id\n\n"
-                    "You can create a KMS key in the AWS Console or using the AWS CLI:\n"
-                    "1. Create a KMS key: aws kms create-key --description 'Bedrock Guardrail Key'\n"
-                    "2. Get the key ARN and add it to your .env file"
+                    "Please add KMS_KEY_ID to your .env file with a valid KMS key ARN.\n"
+                    "Example: KMS_KEY_ID=arn:aws:kms:us-east-1:123456789012:key/abcd1234-..."
                 )
+                
+            guardrail_config['kmsKeyId'] = kms_key_id
+            print(f"🔑 Using KMS Key: {kms_key_id}")
             
             # Verify the KMS key exists and is accessible
             try:
@@ -737,50 +745,60 @@ class BankingGuardrailManager:
             print("\n📝 Guardrail Configuration:")
             print(json.dumps(guardrail_config, indent=2, default=str))
             
-            # Create the guardrail
-            print("\n🔄 Creating guardrail...")
-            try:
-                response = self.client.create_guardrail(**guardrail_config)
-                
-                if 'guardrailId' in response:
-                    guardrail_id = response['guardrailId']
-                    print(f"\n✅ Guardrail created successfully!")
-                    print(f"   • Guardrail ID: {guardrail_id}")
-                    print(f"   • Name: {guardrail_name}")
-                    print(f"   • Region: {self.region}")
+            # Create the guardrail with retry logic
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    print(f"\n🔄 Creating guardrail (Attempt {attempt}/{max_retries})...")
+                    response = self.client.create_guardrail(**guardrail_config)
                     
-                    # Save guardrail details to a file for reference
-                    with open('guardrail_details.json', 'w') as f:
-                        json.dump({
+                    if 'guardrailId' in response:
+                        guardrail_id = response['guardrailId']
+                        guardrail_arn = response.get('guardrailArn', 'N/A')
+                        
+                        # Save guardrail details
+                        guardrail_details = {
                             'guardrail_id': guardrail_id,
                             'name': guardrail_name,
+                            'arn': guardrail_arn,
                             'region': self.region,
-                            'created_at': datetime.now().isoformat(),
-                            'arn': response.get('guardrailArn')
-                        }, f, indent=2)
+                            'kms_key_id': kms_key_id,
+                            'created_at': datetime.now().isoformat()
+                        }
+                        
+                        # Save guardrail details to file
+                        with open('guardrail_details.json', 'w') as f:
+                            json.dump(guardrail_details, f, indent=2)
+                        
+                        print("\n✅ Guardrail created successfully!")
+                        print("\n📋 Guardrail Details:")
+                        print(f"   • ID: {guardrail_id}")
+                        print(f"   • Name: {guardrail_name}")
+                        print(f"   • ARN: {guardrail_arn}")
+                        print(f"   • Region: {self.region}")
+                        print("\n⚠️  Note: The guardrail needs to be deployed manually through the AWS Console.")
+                        
+                        return guardrail_id
                     
-                    return guardrail_id
-                else:
-                    print("\n❌ Failed to create guardrail. No guardrail ID in response.")
-                    print("Response from API:", json.dumps(response, indent=2, default=str))
-                    return None
-                    
-            except Exception as e:
-                print(f"\n❌ Error creating guardrail: {str(e)}")
-                if hasattr(e, 'response') and 'Error' in e.response:
-                    print("\n🔍 Error details:")
-                    print(f"   • Error Code: {e.response['Error'].get('Code', 'Unknown')}")
-                    print(f"   • Message: {e.response['Error'].get('Message', 'No error message')}")
-                    print(f"   • Request ID: {e.response.get('ResponseMetadata', {}).get('RequestId', 'N/A')}")
-                    
-                    # Print additional error details if available
-                    if 'Error' in e.response and 'Message' in e.response['Error']:
-                        print("\nAdditional error context:")
-                        print(e.response['Error']['Message'])
-                return None
+                except Exception as e:
+                    if attempt == max_retries:
+                        raise
+                    print(f"⚠️  Attempt {attempt} failed: {str(e)}")
+                    print(f"🕒 Retrying in 5 seconds...")
+                    time.sleep(5)
+            
+            print("\n❌ Failed to create guardrail after multiple attempts")
+            return None
 
         except Exception as e:
-            self._handle_error(e)
+            if hasattr(e, 'response'):
+                print(f"\n❌ Error creating guardrail: {e.response.get('Error', {}).get('Message', str(e))}")
+                print("\n🔍 Error details:")
+                print(f"   • Error Code: {e.response.get('Error', {}).get('Code', 'Unknown')}")
+                print(f"   • Message: {e.response.get('Error', {}).get('Message', 'No error message')}")
+                print(f"   • Request ID: {e.response.get('ResponseMetadata', {}).get('RequestId', 'N/A')}")
+            else:
+                print(f"\n❌ Error creating guardrail: {str(e)}")
             return None
 
 
@@ -792,11 +810,18 @@ def main():
     guardrail_id = guardrail_manager.create_banking_guardrail()
     
     if guardrail_id:
-        print("\n🎉 Guardrail deployment completed successfully!")
-        print("Next steps:")
-        print("1. Test the guardrail with sample banking conversations")
-        print("2. Review the guardrail settings in the AWS Management Console")
-        print("3. Integrate the guardrail ID with your voice bot application")
+        print("\n🎉 Guardrail creation completed successfully!")
+    print("\nNext steps:")
+    print("1. Go to AWS Management Console > Amazon Bedrock > Guardrails")
+    print("2. Find your guardrail: {guardrail_id}")
+    print("3. Deploy the guardrail through the console")
+    print("4. Test the guardrail with sample banking conversations")
+    print("5. Integrate the guardrail ID with your voice bot application")
+    print("\n💡 Guardrail details have been saved to 'guardrail_details.json'")
+    
+    # Print the guardrail ID in a format that's easy to copy
+    print("\n🔑 Guardrail ID (copy this for your application):")
+    print(f"{guardrail_id}")
 
 
 if __name__ == "__main__":

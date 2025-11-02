@@ -1,7 +1,8 @@
 {
-  "guardrail_id": "o9vdzplu3o02",
-  "name": "BankingVoiceBotGuardrail-20251102110331",
+  "guardrail_id": "ze75inb2clma",
+  "name": "BankingVoiceBotGuardrail-20251102-161609",
+  "arn": "arn:aws:bedrock:us-east-1:845244108475:guardrail/ze75inb2clma",
   "region": "us-east-1",
-  "created_at": "2025-11-02T11:03:34.119024",
-  "arn": "arn:aws:bedrock:us-east-1:845244108475:guardrail/o9vdzplu3o02"
+  "kms_key_id": "arn:aws:kms:us-east-1:845244108475:key/b33a1516-f5ba-49d8-b567-6ab264fa4b65",
+  "created_at": "2025-11-02T16:16:12.770023"
 }
